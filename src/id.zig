@@ -119,19 +119,26 @@ pub fn getpnam(name: [*:0]const u8) ?*passwd {
 pub fn shadowauth(name: [*:0]const u8, persist: bool) bool {
     if (persist) {}
 
-    const pw = std.c.getpwnam(@ptrCast(name.ptr)) orelse {
+    // const pw = std.c.getpwnam(@ptrCast(name.ptr)) orelse {
+    const pw = std.c.getpwnam(name);
+    if (pw == null) {
         std.log.err("getpwnam", .{});
         return false;
-    };
+    }
 
-    var hash: [*:0]const u8 = pw.pw_passwd orelse {
+    // var hash: [*:0]const u8 = pw.?.passwd;
+    var hash: [*:0]const u8 = undefined;
+    if (pw.?.passwd) |p| {
+        hash = p;
+    } else {
         std.log.err("getpwnam", .{});
         return false;
-    };
+    }
 
     if (hash[0] == 'x' and hash[1] == '\x00') {
         // const spw = std.c.getpwnam_shadow(@ptrCast(name.ptr));
-        const spwd: ?*shadow.spwd = shadow.getspnam(@ptrCast(name.ptr));
+        // const spwd: ?*shadow.spwd = shadow.getspnam(@ptrCast(name.ptr));
+        const spwd: ?*shadow.spwd = shadow.getspnam(name);
 
         if (spwd) |sp| hash = sp.sp_pwdp else {
             std.log.err("Authentication failed", .{});

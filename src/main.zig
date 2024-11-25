@@ -10,8 +10,8 @@ pub fn main() !void {
     // const my_pass = user.getpwuid(uid);
     const target_pass = user.getpwuid(0);
 
-    // if (std.os.linux.getuid() != 0)
-    //     std.log.err("binary is not setuid", .{});
+    if (std.os.linux.geteuid() != 0)
+        std.log.err("binary is not setuid", .{});
 
     var formerpath: [:0]const u8 = undefined;
     if (std.posix.getenv("PATH")) |path| {
@@ -35,20 +35,39 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const env_map = try arena.allocator().create(std.process.EnvMap);
+    var env_map = try arena.allocator().create(std.process.EnvMap);
     env_map.* = try std.process.getEnvMap(arena.allocator());
     defer env_map.deinit(); // technically unnecessary when using ArenaAllocator
                             
     // maybe this?
     // const ui = try std.process.posixGetUserInfo("sweet");
 
+    var enviter = env_map.iterator();
+
+    while (enviter.next()) |value| {
+        const eql = std.mem.eql;
+        const key = value.key_ptr.*;
+        if (eql(u8, "TERM", key) or eql(u8, "DISPLAY", key)) {
+            continue;
+        } else {
+            env_map.remove(key);
+        }
+    }
+
     // set env
+    // TODO: check if these are null properly
+    const span = std.mem.span;
     try env_map.put("PATH", safepath);
+    try env_map.put("HOME", span(target_pass.?.dir.?));
+    try env_map.put("USER", span(target_pass.?.name.?));
+    try env_map.put("LOGNAME", span(target_pass.?.name.?));
+    try env_map.put("DOAS_USER", span(target_pass.?.name.?));
+    try env_map.put("SHELL", span(target_pass.?.shell.?));
 
     const calloc = std.heap.c_allocator;
-
     var args = std.process.args();
     defer args.deinit();
+
     // skip self / exe
     _ = args.next();
 
