@@ -1,14 +1,22 @@
 const std = @import("std");
-const Allocator = @import("std").mem.Allocator;
-const linux = @import("std").os.linux;
-const uid_t = @import("std").c.uid_t;
-const gid_t = @import("std").c.gid_t;
-const passwd = @import("std").c.passwd;
+const tty = @import("tty.zig");
+const auth = @import("auth.zig");
+
+const mem = std.mem;
+const span = std.mem.span;
+const assert = std.debug.assert;
+
+const Allocator = std.mem.Allocator;
+const linux = std.os.linux;
+const uid_t = std.c.uid_t;
+const gid_t = std.c.gid_t;
+const passwd = std.c.passwd;
 
 const c = @cImport({
     @cInclude("pwd.h");
     @cInclude("grp.h");
     @cInclude("unistd.h");
+    @cInclude("string.h");
 });
 
 const shadow = @cImport({
@@ -19,17 +27,17 @@ const crypt = @cImport({
     @cInclude("crypt.h");
 });
 
-const bsd = @cImport({
-    @cInclude("bsd/readpassphrase.h");
-});
-
 const IdentityError = error{
     UIDMismatch,
     NoPasswd,
     InvalidGID,
     GroupListFail,
     InitGroupFail,
+    Getpwnam,
+    GetShadowEntry,
 };
+
+const AuthError = error{InvalidPassword};
 
 fn ErrorMessage(err: anyerror) []const u8 {
     switch (err) {
@@ -116,72 +124,77 @@ pub fn getpnam(name: [*:0]const u8) ?*passwd {
     return std.c.getpwnam(name);
 }
 
-pub fn shadowauth(name: [*:0]const u8, persist: bool) bool {
+/// authorize the given user, if an error is returned,
+/// the user is not authorized
+pub fn shadowauth(name: [*:0]const u8, persist: bool) !void {
     if (persist) {}
 
-    // const pw = std.c.getpwnam(@ptrCast(name.ptr)) orelse {
     const pw = std.c.getpwnam(name);
     if (pw == null) {
         std.log.err("getpwnam", .{});
-        return false;
+        return error.Getpwnam;
     }
 
-    // var hash: [*:0]const u8 = pw.?.passwd;
-    var hash: [*:0]const u8 = undefined;
-    if (pw.?.passwd) |p| {
-        hash = p;
-    } else {
+    var hash: [*:0]const u8 = pw.?.passwd orelse {
         std.log.err("getpwnam", .{});
-        return false;
-    }
+        return error.Getpwnam;
+    };
 
     if (hash[0] == 'x' and hash[1] == '\x00') {
-        // const spw = std.c.getpwnam_shadow(@ptrCast(name.ptr));
-        // const spwd: ?*shadow.spwd = shadow.getspnam(@ptrCast(name.ptr));
         const spwd: ?*shadow.spwd = shadow.getspnam(name);
 
         if (spwd) |sp| hash = sp.sp_pwdp else {
-            std.log.err("Authentication failed", .{});
+            std.log.err("Authentication failed: failed to get passwd entry", .{});
+            return error.GetShadowEntry;
         }
     } else if (hash[0] != '*') {
-        std.log.err("Authentication failed", .{});
-        return false;
+        std.log.err("Authentication failed: failed to get passwd entry", .{});
+        return error.GetShadowEntry;
     }
 
     var bhost: [std.posix.HOST_NAME_MAX]u8 = undefined;
     const hostname = std.posix.gethostname(@ptrCast(&bhost)) catch "?";
 
     var bprompt: [256]u8 = std.mem.zeroes([256]u8);
-    _ = std.fmt.bufPrint(&bprompt, "\rsaka ({s}@{s}) password: ", .{ name, hostname }) catch unreachable;
 
-    var rbuf: [1024]u8 = undefined;
-    defer @memset(&rbuf, 0); // TODO: make sure this is not optimized away
-
-    const response: [*:0]const u8 = bsd.readpassphrase(@ptrCast(&bprompt), @ptrCast(&rbuf), 1024, bsd.RPP_REQUIRE_TTY) orelse {
-        if (std.c._errno().* == @intFromEnum(std.posix.E.NOTTY)) {
-            // LOG_AUTHPRIV | LOG_NOTICE,
-            std.c.syslog((@as(c_int, 10) << @intCast(3)) | @as(c_int, 5), "tty required for %s", name.ptr);
-            std.log.err("a tty is required", .{});
-            return false;
-        } else {
-            std.log.err("readpassphrase", .{});
-            return false;
-        }
-    };
-
-    const encrypted: [*:0]u8 = crypt.crypt(response, hash) orelse {
-        std.log.err("Authentication failed", .{});
-        return false;
-    };
-
-    if (std.mem.orderZ(u8, encrypted, hash) == .eq) {
-        // LOG_AUTHPRIV | LOG_NOTICE,
-        std.c.syslog((@as(c_int, 10) << @intCast(3)) | @as(c_int, 5), "failed auth for %s", name.ptr);
-        std.log.err("Authentication failed", .{});
-        return false;
+    if (std.posix.getenv("NO_COLOR")) |_| {
+        _ = std.fmt.bufPrint(&bprompt, "\rdoaz ({s}@{s}) password: ", .{ name, hostname }) catch unreachable;
+    } else {
+        _ = std.fmt.bufPrint(&bprompt, "\r{s}doaz ({s}{s}{s}{s}{s}@{s}{s}{s}{s}{s}) password:{s} ", .{
+            "\x1b[90m",
+            "\x1b[0m",
+            "\x1b[32m",
+            name,
+            "\x1b[0m",
+            "\x1b[90m",
+            "\x1b[0m",
+            "\x1b[34m",
+            hostname,
+            "\x1b[0m",
+            "\x1b[90m",
+            "\x1b[0m",
+        }) catch unreachable;
     }
 
-    return true;
+    // print the prompt
+    std.debug.print("{s}", .{bprompt});
+    defer std.debug.print("\r\x1b[2K", .{});
+
+    // password buffer. must be cleared as soon as possible.
+    var rbuf: [1024]u8 = std.mem.zeroes([1024]u8);
+    defer {
+        mem.doNotOptimizeAway(.{
+            @memset(&rbuf, 0),
+        });
+    }
+
+    // read the user password
+    const term = try tty.init();
+    const buf = try term.readpass(&rbuf);
+    const copyz: [*:0]const u8 = @ptrCast(rbuf[0..buf]);
+
+    try auth.authorizeZ(copyz, hash);
+    return;
 }
 
 pub fn initgroups(user: [*c]const u8, group: gid_t) !void {
@@ -191,20 +204,24 @@ pub fn initgroups(user: [*c]const u8, group: gid_t) !void {
 test "get group names" {
     const alloc = std.testing.allocator;
 
-    const groups = try getgroups(alloc, "sweet");
+    if (std.posix.getenv("USER")) |user| {
+        const groups = try getgroups(alloc, user);
+        assert(groups.len != 0);
+        try std.testing.expect(groups.len != 0);
 
-    // we have to do the "reverse" of how we allocated this function
-    defer {
-        for (groups) |g| alloc.free(g);
-        alloc.free(groups);
+        // we have to do the "reverse" of how we allocated this function
+        defer {
+            for (groups) |g| alloc.free(g);
+            alloc.free(groups);
+        }
+
+        std.debug.print("\n", .{});
+
+        var i: usize = 0;
+        while (i < groups.len) : (i += 1) {
+            std.debug.print("{s}\n", .{groups[i]});
+        }
+    } else {
+        std.log.err("unable to test getgroups() USER env var is null", .{});
     }
-
-    std.debug.print("\n", .{});
-
-    var i: usize = 0;
-    while (i < groups.len) : (i += 1) {
-        std.debug.print("{s}\n", .{groups[i]});
-    }
-
-    // try std.testing.checkAllAllocationFailures(alloc, getgroups, .{"sweet"});
 }

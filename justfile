@@ -12,7 +12,8 @@ chmod:
 build:
     #!/usr/bin/env bash
     printf "\e[3;33;3m%s\e[0m\n" "Building doaz"
-    zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl
+    # zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-musl
+    zig build -Doptimize=ReleaseSafe
     just --justfile {{justfile()}} chmod
 
 # install-usr-bin:
