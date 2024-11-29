@@ -76,5 +76,10 @@ pub fn main() !void {
     }
 
     const argv = try arglist.toOwnedSlice();
+    if (argv.len == 0) {
+        std.log.err("usage: doaz <cmd>", .{});
+        std.posix.exit(1);
+    }
+
     std.process.execve(calloc, argv, env_map) catch unreachable;
 }
