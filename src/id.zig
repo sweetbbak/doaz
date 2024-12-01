@@ -116,12 +116,20 @@ pub fn parsegid(groupname: [*:0]const u8) !gid_t {
     return grp.gr_gid;
 }
 
-pub fn getpwuid(uid: uid_t) ?*passwd {
-    return std.c.getpwuid(uid);
+pub fn getpwuid(uid: uid_t) !*passwd {
+    if (std.c.getpwuid(uid)) |pass| {
+        return pass;
+    } else {
+        return error.NullPasswd;
+    }
 }
 
-pub fn getpnam(name: [*:0]const u8) ?*passwd {
-    return std.c.getpwnam(name);
+pub fn getpwnam(name: [*:0]const u8) !*passwd {
+    if (std.c.getpwnam(name)) |pass| {
+        return pass;
+    } else {
+        return error.NullPasswd;
+    }
 }
 
 /// authorize the given user, if an error is returned,
@@ -129,28 +137,31 @@ pub fn getpnam(name: [*:0]const u8) ?*passwd {
 pub fn shadowauth(name: [*:0]const u8, persist: bool) !void {
     if (persist) {}
 
-    const pw = std.c.getpwnam(name);
-    if (pw == null) {
-        std.log.err("getpwnam", .{});
+    const pw = getpwnam(name) catch |err| {
+        std.log.err("getpwnam {s}", .{@errorName(err)});
         return error.Getpwnam;
-    }
+    };
 
-    var hash: [*:0]const u8 = pw.?.passwd orelse {
+    var hash: [*:0]const u8 = pw.passwd orelse {
         std.log.err("getpwnam", .{});
         return error.Getpwnam;
     };
+
+    std.log.debug("hash {s} name {s}", .{hash, name});
 
     if (hash[0] == 'x' and hash[1] == '\x00') {
         const spwd: ?*shadow.spwd = shadow.getspnam(name);
 
         if (spwd) |sp| hash = sp.sp_pwdp else {
-            std.log.err("Authentication failed: failed to get passwd entry", .{});
+            std.log.err("Authentication failed: failed to get passwd entry for {s}", .{name});
             return error.GetShadowEntry;
         }
     } else if (hash[0] != '*') {
-        std.log.err("Authentication failed: failed to get passwd entry", .{});
+        std.log.err("Authentication failed: failed to get passwd entry, found '*' in hash", .{});
         return error.GetShadowEntry;
     }
+
+    std.log.debug("hash {s}", .{hash});
 
     var bhost: [std.posix.HOST_NAME_MAX]u8 = undefined;
     const hostname = std.posix.gethostname(@ptrCast(&bhost)) catch "?";
