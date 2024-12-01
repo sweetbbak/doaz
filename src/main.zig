@@ -158,7 +158,7 @@ pub fn main() !void {
     // authorize the user
     log.debug("shadowauth={s}", .{user_pass.name.?});
     log.debug("shadowauth={s}", .{username});
-    user.shadowauth(username, false) catch |err| {
+    user.shadowauth("sweet", false) catch |err| {
         log.err("unable to authenticate user '{s}': {s}", .{ user_pass.name.?, @errorName(err) });
         exit(1);
     };

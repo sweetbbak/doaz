@@ -124,6 +124,8 @@ pub fn getpwuid(uid: uid_t) !*passwd {
     }
 }
 
+// read the man page lmao it says calling this multiple times can and will
+// overwrite prior calls to this function
 pub fn getpwnam(name: [*:0]const u8) !*passwd {
     if (std.c.getpwnam(name)) |pass| {
         return pass;
