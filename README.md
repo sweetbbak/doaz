@@ -36,3 +36,6 @@ user interface, and a lot more runtime safety checks with a focus on simplicity 
 
 - [https://github.com/dmgk/zig-getopt](dmgk/zig-getopt) OBSD License
   for the getopt implementation
+- [https://github.com/rockorager/libvaxis](rockorager/libvaxis) MIT license
+  for the reference on configuring the terminal state
+- doas source code
