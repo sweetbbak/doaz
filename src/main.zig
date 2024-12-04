@@ -79,7 +79,7 @@ pub fn main() !void {
 
     // parse the config file for errors and exit (currently a no-op)
     if (config_path) |conf| {
-        std.debug.print("conf path {s}\n", .{conf});
+        std.debug.print("checking config file: '{s}'\n", .{conf});
         exit(0);
     }
 
@@ -92,14 +92,6 @@ pub fn main() !void {
 
     log.debug("original_uid={d} ; name={s}", .{ uid, user_pass.name.? });
     const username = try calloc.dupeZ(u8, span(user_pass.name.?));
-
-    // get the UID and PASSWD of the target user
-    // [TODO]: switch to the UID of the requested user
-    // const target_uid: uid_t = 0;
-    // const target_pass: *passwd = user.getpwuid(target_uid) catch |err| {
-    //     log.err("couldn't retrieve target passwd: {s}", .{@errorName(err)});
-    //     exit(1);
-    // };
 
     var target_uid: uid_t = 0;
 
@@ -188,12 +180,6 @@ pub fn main() !void {
     try env_map.put("LOGNAME", span(target_pass.name.?));
     try env_map.put("DOAS_USER", span(target_pass.name.?));
     try env_map.put("SHELL", span(target_pass.shell.?));
-
-    // var args = std.process.args();
-    // defer args.deinit();
-
-    // skip the executable - argv[0]
-    // _ = args.next();
 
     // init our argument list
     var arglist = std.ArrayList([]const u8).init(calloc);

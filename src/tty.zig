@@ -21,7 +21,7 @@ var handler_idx: usize = 0;
 
 var handler_installed: bool = false;
 
-/// initializes a Tty instance by opening /dev/tty and "making it raw". A
+/// initializes a Tty instance by opening /dev/tty. A
 /// signal handler is installed for SIGWINCH. No callbacks are installed, be
 /// sure to register a callback when initializing the event loop
 pub fn init() !Term {
@@ -37,7 +37,18 @@ pub fn init() !Term {
         .flags = 0,
     };
 
+    // save and restore these
     posix.sigaction(posix.SIG.WINCH, &act, null);
+    posix.sigaction(posix.SIG.HUP, &act, null);
+    posix.sigaction(posix.SIG.ALRM, &act, null);
+    // posix.sigaction(posix.SIG.INT, &act, null); // we want to interrupt
+    posix.sigaction(posix.SIG.PIPE, &act, null);
+    posix.sigaction(posix.SIG.QUIT, &act, null);
+    posix.sigaction(posix.SIG.TERM, &act, null);
+    // posix.sigaction(posix.SIG.STOP, &act, null); // idk why this causes a segfault
+    posix.sigaction(posix.SIG.TTIN, &act, null);
+    posix.sigaction(posix.SIG.TTOU, &act, null);
+
     handler_installed = true;
 
     const self: Term = .{
@@ -56,8 +67,8 @@ pub fn readpass(self: *const Term, buf: []u8) !usize {
 
     // raw.iflag.ICRNL = false;
     raw.lflag.ECHO = false;
-    raw.lflag.ICANON = false;
-    raw.lflag.ISIG = false;
+    // raw.lflag.ICANON = false;
+    // raw.lflag.ISIG = false;
 
     // set state to no echo
     try posix.tcsetattr(self.fd, .FLUSH, raw);
@@ -69,7 +80,8 @@ pub fn readpass(self: *const Term, buf: []u8) !usize {
         };
     }
 
-    return try self.readline(buf);
+    // return try self.readline(buf);
+    return try self.readline2(buf);
 }
 
 pub fn read(self: *const Term, buf: []u8) !usize {
@@ -92,13 +104,51 @@ pub fn anyReader(self: *const Term) std.io.AnyReader {
 /// be careful not to slice this data, it needs to be a null terminated
 /// array to be passed to crypt() - otherwise you will have odd errors
 fn readline(self: *const Term, buf: []u8) !usize {
+    if (buf.len == 0) {
+        return error.BufferLengthInvalid;
+    }
+
     const reader = self.anyReader();
     var fbs = std.io.fixedBufferStream(buf);
     try reader.streamUntilDelimiter(fbs.writer(), '\n', fbs.buffer.len);
     return fbs.pos;
 }
 
-fn handleWinch(_: c_int) callconv(.C) void {
+const PassConfig = struct {
+    echo: Echo = .NO_ECHO,
+
+    const Echo = enum {
+        NO_ECHO,
+        ECHO,
+        DOTS,
+    };
+};
+
+fn readline2(self: *const Term, buf: []u8) !usize {
+    if (buf.len == 0) {
+        return error.BufferLengthInvalid;
+    }
+
+    const reader = self.anyReader();
+    var fbs = std.io.fixedBufferStream(buf);
+    const writer = fbs.writer();
+
+    const max_size = fbs.buffer.len;
+
+    for (0..max_size) |_| {
+        const byte: u8 = try reader.readByte();
+        if (byte == '\n' or byte == '\r') return fbs.pos;
+        std.debug.print("*", .{});
+        try writer.writeByte(byte);
+    }
+
+    return error.StreamTooLong;
+
+    // if (err) return err;
+    // return fbs.pos;
+}
+
+fn handleWinchOld(_: c_int) callconv(.C) void {
     handler_mutex.lock();
     defer handler_mutex.unlock();
     var i: usize = 0;
@@ -106,6 +156,9 @@ fn handleWinch(_: c_int) callconv(.C) void {
         const handler = handlers[i];
         handler.callback(handler.context);
     }
+}
+
+fn handleWinch(_: c_int) callconv(.C) void {
 }
 
 /// makeRaw enters the raw state for the terminal.

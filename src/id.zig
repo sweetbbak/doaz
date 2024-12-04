@@ -1,6 +1,7 @@
 const std = @import("std");
 const tty = @import("tty.zig");
 const auth = @import("auth.zig");
+const rpass = @import("readpass.zig");
 
 const mem = std.mem;
 const span = std.mem.span;
@@ -134,6 +135,39 @@ pub fn getpwnam(name: [*:0]const u8) !*passwd {
     }
 }
 
+pub fn getpwnam_r(name: [*:0]const u8) !*passwd {
+    if (std.c.getpwnam_r(name)) |pass| {
+        return pass;
+    } else {
+        return error.NullPasswd;
+    }
+}
+
+/// passwd can be overwritten when called multiple times, this ensures
+/// that you own the memory and a lasting copy of the passwd entry
+// pub fn getpwuid_alloc(alloc: Allocator, uid: uid_t) !*passwd {
+//     _ = alloc; // autofix
+//     if (std.c.getpwuid(uid)) |pass| {
+//         const p: passwd = undefined;
+//         @memcpy(p, pass);
+//         return p;
+//     } else {
+//         return error.NullPasswd;
+//     }
+// }
+
+// read the man page lmao it says calling this multiple times can and will
+// overwrite prior calls to this function
+/// passwd can be overwritten when called multiple times, this ensures
+/// that you own the memory and a lasting copy of the passwd entry
+pub fn getpwnam_alloc(alloc: Allocator, name: [*:0]const u8) !*passwd {
+    if (std.c.getpwnam(name)) |pass| {
+        return try alloc.dupe(pass);
+    } else {
+        return error.NullPasswd;
+    }
+}
+
 /// authorize the given user, if an error is returned,
 /// the user is not authorized
 pub fn shadowauth(name: [*:0]const u8, persist: bool) !void {
@@ -201,12 +235,9 @@ pub fn shadowauth(name: [*:0]const u8, persist: bool) !void {
         });
     }
 
-    // read the user password
-    const term = try tty.init();
-    const buf = try term.readpass(&rbuf);
-    const copyz: [*:0]const u8 = @ptrCast(rbuf[0..buf]);
+    const pass = try rpass.getpass(&rbuf);
 
-    try auth.authorizeZ(copyz, hash);
+    try auth.authorizeZ(pass, hash);
     return;
 }
 
