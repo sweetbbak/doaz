@@ -13,18 +13,61 @@ const gid_t = @import("std").c.gid_t;
 const passwd = std.c.passwd;
 
 fn usage() void {
-    const message =
-        \\usage: doaz [-Lns] [-C config] [-u user] command [args]
+    // const message =
+    //     \\usage: doaz [-Lns] [-C config] [-u user] command [args]
+    //     \\execute a command as another user
+    //     \\    -h     print this help message
+    //     \\    -v     use verbose output
+    //     \\    -u     execute the command as the given user
+    //     \\    -s     execute the shell from $SHELL or /etc/passwd
+    //     \\    -L     clear any persisted authentications
+    //     \\    -n     non-interactive mode, fails if the matching rule doesnt have the nopass option
+    //     \\    -C     parse and check the given configuration file and then exit
+    // ;
+
+    const message2 =
+        \\{s}usage:{s} {s}doaz{s} [{s}-Lns{s}] [{s}-C config{s}] [{s}-u user{s}] command {s}[args]{s}
         \\execute a command as another user
-        \\    -h     print this help message
-        \\    -v     use verbose output
-        \\    -u     execute the command as the given user
-        \\    -s     execute the shell from $SHELL or /etc/passwd
-        \\    -L     clear any persisted authentications
-        \\    -n     non-interactive mode, fails if the matching rule doesnt have the nopass option
-        \\    -C     parse and check the given configuration file and then exit
+        \\    {s}-h{s}     print this help message
+        \\    {s}-v{s}     use verbose output
+        \\    {s}-u{s}     execute the command as the given user
+        \\    {s}-s{s}     execute the shell from $SHELL or /etc/passwd
+        \\    {s}-L{s}     clear any persisted authentications
+        \\    {s}-n{s}     non-interactive mode, fails if the matching rule doesnt have the nopass option
+        \\    {s}-C{s}     parse and check the given configuration file and then exit
+        \\
     ;
-    std.debug.print("{s}\n", .{message});
+
+    // std.debug.print("{s}\n", .{message});
+    std.debug.print(message2 ++ "\n", .{
+        "\x1b[3m\x1b[4m",
+        "\x1b[0m",
+        "\x1b[32m",
+        "\x1b[0m",
+        "\x1b[34m",
+        "\x1b[0m",
+        "\x1b[34m",
+        "\x1b[0m",
+        "\x1b[34m",
+        "\x1b[0m",
+        "\x1b[34m",
+        "\x1b[0m",
+        //flags
+        "\x1b[3m\x1b[34m",
+        "\x1b[0m",
+        "\x1b[3m\x1b[34m",
+        "\x1b[0m",
+        "\x1b[3m\x1b[34m",
+        "\x1b[0m",
+        "\x1b[3m\x1b[34m",
+        "\x1b[0m",
+        "\x1b[3m\x1b[34m",
+        "\x1b[0m",
+        "\x1b[3m\x1b[34m",
+        "\x1b[0m",
+        "\x1b[3m\x1b[34m",
+        "\x1b[0m",
+    });
 }
 
 pub fn main() !void {
@@ -85,30 +128,53 @@ pub fn main() !void {
 
     // get the calling users UID and PASSWD information
     const uid = std.os.linux.getuid();
-    const user_pass: *passwd = user.getpwuid(uid) catch |err| {
+    // const user_pass: *passwd = user.getpwuid(uid) catch |err| {
+    var buffer: [1024]u8 = undefined;
+    var tmp: passwd = undefined;
+    var user_pass: passwd = undefined;
+    // const xxx: *passwd = user.getpwuid_rr(uid, &buffer) catch |err| {
+    _ = user.getpwuid_rr(uid, &buffer, &user_pass, &tmp) catch |err| {
         log.err("couldn't retrieve user passwd: {s}", .{@errorName(err)});
         exit(1);
     };
 
+    // std.debug.print("buffer {s}\n", .{std.mem.sliceTo(&buffer, 0)});
+    // std.debug.print("pass {s} {s}\n", .{user_pass.name.?, user_pass.passwd.?});
+    std.debug.print("user pass: {any}\n", .{user_pass});
+    std.debug.print("user pass temp: {any}\n", .{tmp});
+
     log.debug("original_uid={d} ; name={s}", .{ uid, user_pass.name.? });
-    const username = try calloc.dupeZ(u8, span(user_pass.name.?));
+    // const username = try calloc.dupeZ(u8, span(user_pass.name.?));
 
-    var target_uid: uid_t = 0;
+    const target_uid: uid_t = 0;
 
+    // if (target_name) |name| {
+    //     target_uid = user.parseuid(@ptrCast(name)) catch |err| {
+    //         log.err("couldn't retrieve UID for '{s}': {s}", .{ name, @errorName(err) });
+    //         exit(1);
+    //     };
+    // }
+    //
+    // log.debug("target UID {d}", .{target_uid});
+
+    // user_pass changes here for some reason
+    // const target_pass: *passwd = user.getpwuid(target_uid) catch |err| {
+    //     log.err("couldn't retrieve target passwd for UID '{d}': {s}", .{ target_uid, @errorName(err) });
+    //     exit(1);
+    // };
+
+    var target_pass: *passwd = undefined;
     if (target_name) |name| {
-        target_uid = user.parseuid(@ptrCast(name)) catch |err| {
-            log.err("couldn't retrieve UID for '{s}': {s}", .{ name, @errorName(err) });
+        target_pass = user.getpwnam(@ptrCast(name)) catch |err| {
+            log.err("couldn't retrieve target passwd for UID '{d}': {s}", .{ name, @errorName(err) });
+            exit(1);
+        };
+    } else {
+        target_pass = user.getpwuid(target_uid) catch |err| {
+            log.err("couldn't retrieve target passwd for UID '{d}': {s}", .{ target_uid, @errorName(err) });
             exit(1);
         };
     }
-
-    log.debug("target UID {d}", .{target_uid});
-
-    // user_pass changes here for some reason
-    const target_pass: *passwd = user.getpwuid(target_uid) catch |err| {
-        log.err("couldn't retrieve target passwd for UID '{d}': {s}", .{ target_uid, @errorName(err) });
-        exit(1);
-    };
 
     const safepath = "/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin";
     var formerpath: [:0]const u8 = undefined;
@@ -148,9 +214,10 @@ pub fn main() !void {
     };
 
     // authorize the user
-    log.debug("shadowauth={s}", .{user_pass.name.?});
-    log.debug("shadowauth={s}", .{username});
-    user.shadowauth("sweet", false) catch |err| {
+    // log.debug("shadowauth={s}", .{user_pass.name.?});
+    // log.debug("shadowauth={s}", .{username});
+    // user.shadowauth(user_pass.name.?, false) catch |err| {
+    user.shadowauth(&user_pass, false) catch |err| {
         log.err("unable to authenticate user '{s}': {s}", .{ user_pass.name.?, @errorName(err) });
         exit(1);
     };

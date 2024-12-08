@@ -9,6 +9,7 @@ const assert = std.debug.assert;
 
 const Allocator = std.mem.Allocator;
 const linux = std.os.linux;
+const posix = std.posix;
 const uid_t = std.c.uid_t;
 const gid_t = std.c.gid_t;
 const passwd = std.c.passwd;
@@ -125,6 +126,33 @@ pub fn getpwuid(uid: uid_t) !*passwd {
     }
 }
 
+pub extern "c" fn getpwuid_r(uid: uid_t, pw: *passwd, buf: [*]u8, buflen: usize, pwretp: ?*passwd) c_int;
+
+pub fn getpwuid_rr(uid: uid_t, buf: []u8, pw: *passwd, result: ?*passwd) !*passwd {
+    // var pw: passwd = undefined;
+    // var result: ?*passwd = null;
+    // const errno = std.c.getpwuid_r(uid, &pw, @ptrCast(buf), buf.len, &result);
+    const errno = getpwuid_r(uid, pw, @ptrCast(buf), buf.len, result);
+    if (errno != 0) {
+        const e = posix.errno(errno);
+        std.log.debug("errno {s} exit {d}\n", .{ @tagName(e), errno });
+
+        switch (e) {
+            .NOENT, .SRCH, .BADF, .PERM => return error.EntryNotFound,
+            .INTR => return error.Interrupt,
+            .MFILE, .NFILE => return error.MaxFileLimit,
+            .NOMEM => return error.MemoryError,
+            .RANGE => return error.InsufficientBuffer,
+            .IO => return error.InputOutputError,
+            else => return if (result != null) return result.? else return error.IDK,
+        }
+    } else if (result == null) {
+        return error.NullPasswd;
+    } else {
+        return result.?;
+    }
+}
+
 // read the man page lmao it says calling this multiple times can and will
 // overwrite prior calls to this function
 pub fn getpwnam(name: [*:0]const u8) !*passwd {
@@ -135,8 +163,10 @@ pub fn getpwnam(name: [*:0]const u8) !*passwd {
     }
 }
 
-pub fn getpwnam_r(name: [*:0]const u8) !*passwd {
-    if (std.c.getpwnam_r(name)) |pass| {
+pub fn getpwnam_r(name: [*:0]const u8, buf: []u8) !*passwd {
+    const pw: *passwd = undefined;
+    const result: *passwd = undefined;
+    if (std.c.getpwnam_r(name, &pw, @ptrCast(buf), buf.len, &result)) |pass| {
         return pass;
     } else {
         return error.NullPasswd;
@@ -168,30 +198,54 @@ pub fn getpwnam_alloc(alloc: Allocator, name: [*:0]const u8) !*passwd {
     }
 }
 
+/// fills the resulting spwd struct with the relevant information
+pub fn getspnam_r(name: [*:0]const u8, buf: []u8, pw: *shadow.spwd, result: ?*shadow.spwd) !void {
+    // const spwd: ?*shadow.spwd = shadow.getspnam(name);
+    const ret = shadow.getspnam_r(name, result, @ptrCast(buf), buf.len, @ptrCast(pw));
+    switch (ret) {
+        0 => return,
+        -1 => return error.SpwdError,
+        else => return error.SpwdUnkownError,
+    }
+}
+
 /// authorize the given user, if an error is returned,
 /// the user is not authorized
-pub fn shadowauth(name: [*:0]const u8, persist: bool) !void {
+// pub fn shadowauth(name: [*:0]const u8, persist: bool) !void {
+pub fn shadowauth(pw: *passwd, persist: bool) !void {
     if (persist) {}
 
-    const pw = getpwnam(name) catch |err| {
-        std.log.err("getpwnam {s}", .{@errorName(err)});
-        return error.Getpwnam;
-    };
+    // const pw = getpwnam(name) catch |err| {
+    //     std.log.err("getpwnam {s}", .{@errorName(err)});
+    //     return error.Getpwnam;
+    // };
 
     var hash: [*:0]const u8 = pw.passwd orelse {
         std.log.err("getpwnam", .{});
         return error.Getpwnam;
     };
 
-    std.log.debug("hash {s} name {s}", .{hash, name});
+    const name = pw.name.?;
+    std.log.debug("hash {s} name {s}", .{ hash, name });
 
     if (hash[0] == 'x' and hash[1] == '\x00') {
         const spwd: ?*shadow.spwd = shadow.getspnam(name);
 
+        // var buffer: [1024]u8 = undefined;
+        // var tmp: shadow.spwd = undefined;
+        // var spwd: shadow.spwd = undefined;
+        // try getspnam_r(name, &buffer, &tmp, &spwd);
+        // try getspnam_r(name, &buffer, &spwd, &tmp);
+        // std.log.debug("real: {any}\ntemp: {any}", .{spwd, tmp});
+
+        // handle situations where passwd is unset ie second field is '!' or '!!' or otherwise
+        // doas allows this to be done without auth I guess
         if (spwd) |sp| hash = sp.sp_pwdp else {
+        // if (spwd.sp_pwdp) |sp| hash = sp.sp_pwdp else {
             std.log.err("Authentication failed: failed to get passwd entry for {s}", .{name});
             return error.GetShadowEntry;
         }
+        // hash = spwd.sp_pwdp;
     } else if (hash[0] != '*') {
         std.log.err("Authentication failed: failed to get passwd entry, found '*' in hash", .{});
         return error.GetShadowEntry;
