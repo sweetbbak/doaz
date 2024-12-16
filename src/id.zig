@@ -241,7 +241,7 @@ pub fn shadowauth(pw: *passwd, persist: bool) !void {
         // handle situations where passwd is unset ie second field is '!' or '!!' or otherwise
         // doas allows this to be done without auth I guess
         if (spwd) |sp| hash = sp.sp_pwdp else {
-        // if (spwd.sp_pwdp) |sp| hash = sp.sp_pwdp else {
+            // if (spwd.sp_pwdp) |sp| hash = sp.sp_pwdp else {
             std.log.err("Authentication failed: failed to get passwd entry for {s}", .{name});
             return error.GetShadowEntry;
         }
