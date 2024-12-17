@@ -118,9 +118,8 @@ pub fn getspnam_r(name: []const u8, sp: *spwd) !void {
     }
 }
 
-pub fn getspnam_r_test(name: []const u8, sp: *spwd) !void {
+fn getspnam_r_test(name: []const u8, sp: *spwd) !void {
     var buf: [1024 * 2]u8 = undefined;
-    // [TODO] change this to posix open with O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC
     var it = try fs.readLines("./shadow", &buf, .{ .open_flags = .{ .mode = .read_only } });
     while (try it.next()) |line| {
         if (!mem.eql(u8, name, line[0..name.len])) {

@@ -5,6 +5,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const opts = b.addOptions();
+    // const shadow_file = b.option([]const u8, "shadow", "expected path of the shadow file");
+    opts.addOption([]const u8, "shadow", "/etc/shadow");
+
     const exe = b.addExecutable(.{
         .name = "doaz",
         .root_source_file = b.path("src/main.zig"),
