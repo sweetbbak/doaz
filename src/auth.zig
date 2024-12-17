@@ -64,6 +64,9 @@ pub fn authorize(input: []const u8, passhash: []const u8) !void {
     std.log.debug("success! {s} {s}", .{ std.mem.span(encrypted), passhash });
 }
 
+// generated with:
+// mkpasswd --method=yescrypt --stdin
+// openssl passwd -6 -salt xyz yourpass
 test "crypt" {
     const hash = "$6$xyz$VKswtvLoVpOLcpjDMIFXhxa8ukqqKSKHjcPBLZUk9NxWldmlFQY4stUGo.QjEhav7mp86ih2PRqYPqjkhWi5y.";
     const response = "yourpass";

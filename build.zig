@@ -5,9 +5,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const opts = b.addOptions();
-    // const shadow_file = b.option([]const u8, "shadow", "expected path of the shadow file");
-    opts.addOption([]const u8, "shadow", "/etc/shadow");
 
     const exe = b.addExecutable(.{
         .name = "doaz",
@@ -17,17 +14,19 @@ pub fn build(b: *std.Build) void {
         // .linkage = .static,
     });
 
-    // exe.linkSystemLibrary2("bsd", .{
-        // .use_pkg_config = .force,
-        // .preferred_link_mode = .dynamic,
-        // .needed = true,
-    // });
+    // add options for using in code
+    const opts = b.addOptions();
 
-    // zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl
+    const shadow_file = b.option([]const u8, "shadow", "expected path to the shadow file") orelse "/etc/shadow";
+    opts.addOption([]const u8, "shadow", shadow_file);
+
+    const passwd_file = b.option([]const u8, "passwd", "expected path to the passwd file") orelse "/etc/passwd";
+    opts.addOption([]const u8, "passwd", passwd_file);
+
+    exe.root_module.addOptions("config", opts);
+
     exe.linkLibC();
     exe.linkSystemLibrary("crypt");
-    // exe.linkSystemLibrary("libbsd");
-
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -54,21 +53,30 @@ pub fn build(b: *std.Build) void {
 
     id_unit_tests.linkLibC();
 
-    const test_unit_tests = b.addTest(.{
+    const auth_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/auth.zig"),
         .target = target,
         .optimize = optimize,
     });
-    test_unit_tests.linkLibC();
-    test_unit_tests.linkSystemLibrary("crypt");
+    auth_unit_tests.linkLibC();
+    auth_unit_tests.linkSystemLibrary("crypt");
+
+    const spnam_unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/getspnam.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    spnam_unit_tests.linkLibC();
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
     const run_id_unit_tests = b.addRunArtifact(id_unit_tests);
-    const test_id_unit_tests = b.addRunArtifact(test_unit_tests);
+    const test_id_unit_tests = b.addRunArtifact(auth_unit_tests);
+    const run_spnam_unit_tests = b.addRunArtifact(spnam_unit_tests);
 
     const test_step = b.step("test", "Run unit tests");
 
     test_step.dependOn(&run_exe_unit_tests.step);
     test_step.dependOn(&run_id_unit_tests.step);
     test_step.dependOn(&test_id_unit_tests.step);
+    test_step.dependOn(&run_spnam_unit_tests.step);
 }

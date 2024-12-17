@@ -1,6 +1,9 @@
 const std = @import("std");
 const mem = std.mem;
+const log = std.log;
 const fs = @import("fs.zig");
+const builtin = @import("builtin");
+const config = @import("config");
 
 const uid_t = std.c.uid_t;
 const gid_t = std.c.gid_t;
@@ -106,41 +109,44 @@ fn parsespent(s: []const u8, sp: *spwd) !void {
 pub fn getspnam_r(name: []const u8, sp: *spwd) !void {
     var buf: [1024 * 2]u8 = undefined;
     // [TODO] change this to posix open with O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC
-    // and allow this to be a configurable file location
-    var it = try fs.readLines("/etc/shadow", &buf, .{ .open_flags = .{ .mode = .read_only } });
+    var it = try fs.readLines(config.shadow, &buf, .{ .open_flags = .{ .mode = .read_only } });
     while (try it.next()) |line| {
         if (!mem.eql(u8, name, line[0..name.len])) {
             continue;
         }
 
-        std.debug.print("pass ent: {s}\n", .{line});
-        try parsespent(name, sp);
+        std.log.debug("pass ent: {s}\n", .{line});
+        try parsespent(line, sp);
     }
 }
 
-fn getspnam_r_test(name: []const u8, sp: *spwd) !void {
+fn getspnam_r_test(name: []const u8, sp: *spwd, path: []const u8) !void {
     var buf: [1024 * 2]u8 = undefined;
-    var it = try fs.readLines("./shadow", &buf, .{ .open_flags = .{ .mode = .read_only } });
+    var it = try fs.readLines(path, &buf, .{ .open_flags = .{ .mode = .read_only } });
     while (try it.next()) |line| {
         if (!mem.eql(u8, name, line[0..name.len])) {
             continue;
         }
 
         std.debug.print("pass ent: {s}\n", .{line});
-        try parsespent(name, sp);
+        try parsespent(line, sp);
     }
 }
 
 test "getspnam_r spoof" {
     var sp: spwd = undefined;
-    try getspnam_r_test("sweet", &sp);
-}
-
-test "parse spwd entry" {
-    var sp: spwd = undefined;
-    try parsespent("sweet:$y$j9T$HzjVBclwrjI59QzzZkkY40$HNR.ah.x2Vlz0FlNIsEedpuDu51C4wqvHYn2LuLwqd4:19949:0:99999:7:::", &sp);
+    try getspnam_r_test("sweet", &sp, "./shadow");
 
     std.debug.print("namp {s}\n", .{sp.sp_namp});
     std.debug.print("pwdp {s}\n", .{sp.sp_pwdp});
     std.debug.print("{any}\n", .{sp});
+}
+
+test "parse spwd entry" {
+    var sp: spwd = undefined;
+    try parsespent("sweet:$6$xyz$VKswtvLoVpOLcpjDMIFXhxa8ukqqKSKHjcPBLZUk9NxWldmlFQY4stUGo.QjEhav7mp86ih2PRqYPqjkhWi5y.:19949:0:99999:7:::", &sp);
+
+    // std.debug.print("namp {s}\n", .{sp.sp_namp});
+    // std.debug.print("pwdp {s}\n", .{sp.sp_pwdp});
+    // std.debug.print("{any}\n", .{sp});
 }
