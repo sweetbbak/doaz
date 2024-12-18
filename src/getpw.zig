@@ -77,21 +77,20 @@ fn parsepass(s: []const u8, pass: *passwd) !void {
             },
         }
     }
-    printPass(pass);
+
+    if (builtin.is_test) {
+        printPass(pass);
+    }
 }
 
 pub fn getpwuid(uid: uid_t, sp: *passwd) !void {
     var buf: [1024 * 2]u8 = undefined;
     var it = try fs.readLines(config.passwd, &buf, .{ .open_flags = .{ .mode = .read_only } });
     while (try it.next()) |line| {
-
         std.log.debug("parsing passwd entry: {s}\n", .{line});
-        // var temp: passwd = undefined;
-        try parsepass(line, &sp);
+        try parsepass(line, sp);
         if (sp.uid == uid) {
             break;
-        } else {
-            sp = null;
         }
     }
 }
@@ -100,9 +99,7 @@ pub fn getpwuid_test(uid: uid_t, sp: *passwd) !void {
     var buf: [1024 * 2]u8 = undefined;
     var it = try fs.readLines(PASSWD, &buf, .{ .open_flags = .{ .mode = .read_only } });
     while (try it.next()) |line| {
-
         std.log.debug("parsing passwd entry: {s}\n", .{line});
-        // var temp: passwd = undefined;
         try parsepass(line, sp);
         if (sp.uid == uid) {
             break;
@@ -151,7 +148,7 @@ fn printPass(pass: *passwd) void {
     std.debug.print("3: dir {s}, ", .{pass.dir.?});
     std.debug.print("4: gecos {s}, ", .{pass.gecos.?});
     std.debug.print("5: shell {s}, ", .{pass.shell.?});
-    std.debug.print("6: gid {d}, 7: uid {d}", .{pass.gid, pass.uid});
+    std.debug.print("6: gid {d}, 7: uid {d}", .{ pass.gid, pass.uid });
     std.debug.print("\n-----------------\n", .{});
 }
 
