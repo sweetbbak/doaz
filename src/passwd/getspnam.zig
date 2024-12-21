@@ -4,13 +4,15 @@ const log = std.log;
 const fs = @import("fs.zig");
 const builtin = @import("builtin");
 const config = @import("config");
-
 const uid_t = std.c.uid_t;
 const gid_t = std.c.gid_t;
 
-pub const SHADOW = "/etc/shadow";
+/// the default shadow file on Unix systems
+// pub const SHADOW = "/etc/shadow";
+pub const SHADOW = @import("config").shadow;
 
 // default unknown values are -1
+/// the shadow password entry
 pub const spwd = struct {
     sp_namp: [:0]const u8, // user login name
     sp_pwdp: [:0]const u8, // encrypted password
@@ -35,17 +37,10 @@ pub const shadow_entry = enum {
     sp_flag,
 };
 
-pub const passwd = struct {
-    name: ?[*:0]const u8, // username
-    passwd: ?[*:0]const u8, // user password
-    uid: uid_t, // user ID
-    gid: gid_t, // group ID
-    gecos: ?[*:0]const u8, // user information
-    dir: ?[*:0]const u8, // home directory
-    shell: ?[*:0]const u8, // shell program
-};
-
-pub fn xatol(s: []const u8) i32 {
+/// parse an integer from a string, returns -1 if there is an error
+/// which is also the default value for non-existent spwd entries 
+/// according to default libc implementations
+fn xatol(s: []const u8) i32 {
     if (s.len < 1) {
         return -1;
     }
@@ -54,18 +49,17 @@ pub fn xatol(s: []const u8) i32 {
         return -1;
     }
 
-    const ret = std.fmt.parseInt(i32, s, 10) catch -1;
-    return ret;
+    return std.fmt.parseInt(i32, s, 10) catch -1;
 }
 
+/// parse a shadow entry... takes a single line
 fn parsespent(s: []const u8, sp: *spwd) !void {
     var it = mem.splitScalar(u8, s, ':');
     var i: u8 = 0;
     while (it.next()) |value| {
         defer i += 1;
 
-        // redundant but whatever
-        if (value.len == 0 or mem.eql(u8, value, "")) {
+        if (value.len == 0) {
             std.debug.print("{d}: empty entry\n", .{i});
         } else {
             std.debug.print("{d}: {s}\n", .{ i, value });
@@ -106,9 +100,10 @@ fn parsespent(s: []const u8, sp: *spwd) !void {
     }
 }
 
-pub fn getspnam_r(name: []const u8, sp: *spwd) !void {
+/// get the shadow password entry for the given username
+pub fn getspnam(name: []const u8, sp: *spwd) !void {
     var buf: [1024 * 2]u8 = undefined;
-    // [TODO] change this to posix open with O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC
+    // TODO change this to posix open with O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC
     var it = try fs.readLines(config.shadow, &buf, .{ .open_flags = .{ .mode = .read_only } });
     while (try it.next()) |line| {
         if (!mem.eql(u8, name, line[0..name.len])) {
@@ -116,11 +111,12 @@ pub fn getspnam_r(name: []const u8, sp: *spwd) !void {
         }
 
         std.log.debug("pass ent: {s}\n", .{line});
-        try parsespent(line, sp);
+        return try parsespent(line, sp);
     }
+    return error.UserNotFound;
 }
 
-fn getspnam_r_test(name: []const u8, sp: *spwd, path: []const u8) !void {
+fn getspnam_test(name: []const u8, sp: *spwd, path: []const u8) !void {
     var buf: [1024 * 2]u8 = undefined;
     var it = try fs.readLines(path, &buf, .{ .open_flags = .{ .mode = .read_only } });
     while (try it.next()) |line| {
@@ -133,9 +129,10 @@ fn getspnam_r_test(name: []const u8, sp: *spwd, path: []const u8) !void {
     }
 }
 
-test "getspnam_r spoof" {
+test "test getspnam" {
     var sp: spwd = undefined;
-    try getspnam_r_test("sweet", &sp, "./shadow");
+    // try getspnam_test("sweet", &sp, "./shadow");
+    try getspnam("sweet", &sp);
 
     std.debug.print("namp {s}\n", .{sp.sp_namp});
     std.debug.print("pwdp {s}\n", .{sp.sp_pwdp});

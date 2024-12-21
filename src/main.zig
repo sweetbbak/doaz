@@ -1,5 +1,6 @@
 const std = @import("std");
 const user = @import("id.zig");
+const pass = @import("passwd/getpw.zig");
 const getopt = @import("getopt.zig");
 const linux = std.os.linux;
 const log = std.log;
@@ -129,21 +130,23 @@ pub fn main() !void {
     // get the calling users UID and PASSWD information
     const uid = std.os.linux.getuid();
     // const user_pass: *passwd = user.getpwuid(uid) catch |err| {
-    var buffer: [1024]u8 = undefined;
-    var tmp: passwd = undefined;
-    var user_pass: passwd = undefined;
+    // var buffer: [1024]u8 = undefined;
+    // var tmp: passwd = undefined;
+    var user_pass: pass.passwd = undefined;
     // const xxx: *passwd = user.getpwuid_rr(uid, &buffer) catch |err| {
-    _ = user.getpwuid_rr(uid, &buffer, &user_pass, &tmp) catch |err| {
-        log.err("couldn't retrieve user passwd: {s}", .{@errorName(err)});
-        exit(1);
-    };
+    // _ = user.getpwuid_rr(uid, &buffer, &user_pass, &tmp) catch |err| {
+    //     log.err("couldn't retrieve user passwd: {s}", .{@errorName(err)});
+    //     exit(1);
+    // };
+
+    try pass.getpwuid(uid, &user_pass);
 
     // std.debug.print("buffer {s}\n", .{std.mem.sliceTo(&buffer, 0)});
     // std.debug.print("pass {s} {s}\n", .{user_pass.name.?, user_pass.passwd.?});
-    std.debug.print("user pass: {any}\n", .{user_pass});
-    std.debug.print("user pass temp: {any}\n", .{tmp});
+    std.debug.print("user pass: {s}\n", .{user_pass.name.?});
+    // std.debug.print("user pass temp: {any}\n", .{tmp});
 
-    log.debug("original_uid={d} ; name={s}", .{ uid, user_pass.name.? });
+    // log.debug("original_uid={d} ; name={any}", .{ uid, user_pass.name });
     // const username = try calloc.dupeZ(u8, span(user_pass.name.?));
 
     const target_uid: uid_t = 0;
@@ -213,14 +216,14 @@ pub fn main() !void {
         exit(1);
     };
 
-    // authorize the user
-    // log.debug("shadowauth={s}", .{user_pass.name.?});
-    // log.debug("shadowauth={s}", .{username});
-    // user.shadowauth(user_pass.name.?, false) catch |err| {
-    user.shadowauth(&user_pass, false) catch |err| {
-        log.err("unable to authenticate user '{s}': {s}", .{ user_pass.name.?, @errorName(err) });
-        exit(1);
-    };
+    if (user_pass.name) |name| {
+        user.shadowauth(name, false) catch |err| {
+            log.err("unable to authenticate user {s}", .{@errorName(err)});
+            exit(1);
+        };
+    } else {
+        @panic("name is null???");
+    }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -263,7 +266,8 @@ pub fn main() !void {
             try arglist.append(value);
             log.debug("got shell from environment", .{});
         } else if (user_pass.shell) |value| {
-            try arglist.append(span(value));
+            // try arglist.append(span(value));
+            try arglist.append(value);
             log.debug("got shell from passwd entry", .{});
         } else {
             log.err("couldnt retrieve users shell for flag '-s'", .{});

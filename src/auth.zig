@@ -61,7 +61,7 @@ pub fn authorize(input: []const u8, passhash: []const u8) !void {
         return error.IncorrectPassword;
     }
 
-    std.log.debug("success! {s} {s}", .{ std.mem.span(encrypted), passhash });
+    // std.log.debug("success! {s} {s}", .{ std.mem.span(encrypted), passhash });
 }
 
 // generated with:

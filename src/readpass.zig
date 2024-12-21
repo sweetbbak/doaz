@@ -151,11 +151,22 @@ fn readline(self: *const Term, buf: []u8) !usize {
 /// read a password into the given buffer and returns
 /// a pointer casted slice of that same buffer that contains
 /// the input
-pub fn getpass(rbuf: []u8) ![*:0]const u8 {
+pub fn getpassZ(rbuf: []u8) ![*:0]const u8 {
     const term = try init();
     defer deinit();
 
     const buf = try term.readpass(rbuf);
     const pass: [*:0]const u8 = @ptrCast(rbuf[0..buf]);
     return pass;
+}
+
+/// read a password into the given buffer and returns
+/// a pointer casted slice of that same buffer that contains
+/// the input
+pub fn getpass(rbuf: []u8) ![]const u8 {
+    const term = try init();
+    defer deinit();
+
+    const buf = try term.readpass(rbuf);
+    return rbuf[0..buf];
 }

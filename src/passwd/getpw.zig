@@ -8,7 +8,7 @@ const config = @import("config");
 const uid_t = std.c.uid_t;
 const gid_t = std.c.gid_t;
 
-pub const PASSWD = "/etc/passwd";
+pub const PASSWD = if (builtin.is_test) "tests/passwd" else config.shadow;
 
 pub const shadow_entry = enum {
     name,
@@ -97,9 +97,10 @@ pub fn getpwuid(uid: uid_t, sp: *passwd) !void {
 
 pub fn getpwuid_test(uid: uid_t, sp: *passwd) !void {
     var buf: [1024 * 2]u8 = undefined;
-    var it = try fs.readLines(PASSWD, &buf, .{ .open_flags = .{ .mode = .read_only } });
+    var it = try fs.readLines("tests/passwd", &buf, .{ .open_flags = .{ .mode = .read_only } });
     while (try it.next()) |line| {
         std.log.debug("parsing passwd entry: {s}\n", .{line});
+        std.debug.print("parsing passwd entry: {s}\n", .{line});
         try parsepass(line, sp);
         if (sp.uid == uid) {
             break;
@@ -107,7 +108,11 @@ pub fn getpwuid_test(uid: uid_t, sp: *passwd) !void {
     }
 }
 
-// consider using NSCD (name service cache daemon) socket for querying cached information
+// consider using NSCD (name service cache daemon) socket for querying cached information like libc (but its not that pressing)
+/// The  getpwnam() function populates a structure containing
+/// the broken-out fields of the record in the password database
+/// (e.g., the local password file /etc/passwd, NIS, and LDAP)
+/// that matches the username name.
 pub fn getpwnam(name: []const u8, sp: *passwd) !void {
     var buf: [1024 * 2]u8 = undefined;
     var it = try fs.readLines(config.passwd, &buf, .{ .open_flags = .{ .mode = .read_only } });
