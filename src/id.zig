@@ -27,10 +27,6 @@ const cshadow = @cImport({
     @cInclude("shadow.h");
 });
 
-const crypt = @cImport({
-    @cInclude("crypt.h");
-});
-
 const IdentityError = error{
     UIDMismatch,
     NoPasswd,

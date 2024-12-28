@@ -122,17 +122,27 @@ pub fn main() !void {
     }
 
     // parse the config file for errors and exit (currently a no-op)
+    // exit 0 for good or 1 for not
     if (config_path) |conf| {
         std.debug.print("checking config file: '{s}'\n", .{conf});
         exit(0);
     }
 
+    if (!run_shell) {
+        if (opts.args() == null) {
+            std.debug.print("error: no command given\n", .{});
+            exit(1);
+        }
+    }
+
     // get the calling users UID and PASSWD information
     const uid = std.os.linux.getuid();
+
     // const user_pass: *passwd = user.getpwuid(uid) catch |err| {
     // var buffer: [1024]u8 = undefined;
     // var tmp: passwd = undefined;
     var user_pass: pass.passwd = undefined;
+
     // const xxx: *passwd = user.getpwuid_rr(uid, &buffer) catch |err| {
     // _ = user.getpwuid_rr(uid, &buffer, &user_pass, &tmp) catch |err| {
     //     log.err("couldn't retrieve user passwd: {s}", .{@errorName(err)});

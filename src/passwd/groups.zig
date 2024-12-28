@@ -16,9 +16,8 @@ const NGROUPS_MAX = 65536; // 32 prior to linux 2.4.*
 
 pub const Group = struct {
     name: []const u8,
-    passwd: ?[]const u8,
+    passwd: []const u8,
     gid: gid_t,
-    user_list: ?[]const []const u8,
 };
 
 pub const group_entry = enum {
@@ -28,19 +27,23 @@ pub const group_entry = enum {
     users,
 };
 
+pub fn _getgroups(size: usize, list: ?*gid_t) usize {
+    return linux.syscall2(.getgroups, size, @intFromPtr(list));
+}
+
 /// The getgroups function is used to inquire about the supplementary
 /// group IDs of the process. Is POSIX compatible
-fn getgroups(alloc: Allocator) ![]uid_t {
+pub fn getgroups(alloc: Allocator) ![]uid_t {
     // why cant I use null
-    var NULL: u32 = 0;
-    const ngroups: usize = linux.getgroups(0, &NULL);
+    const ngroups: usize = _getgroups(0, null);
     if (ngroups <= 0) {
         return error.GetGroupsError;
     }
 
+    std.debug.print("number of groups: {d}\n", .{ngroups});
     const groups_gids: []u32 = try alloc.alloc(u32, ngroups);
 
-    const exit = linux.getgroups(ngroups, @ptrCast(groups_gids));
+    const exit = _getgroups(ngroups, @ptrCast(groups_gids));
     if (exit < 0) {
         return error.GetGroupsError;
     }
@@ -50,7 +53,7 @@ fn getgroups(alloc: Allocator) ![]uid_t {
 
 /// sets the supplementary group IDs for the calling process
 /// (which can be different than the real GIDs from the calling user)
-fn setgroups(count: usize, groups: []gid_t) !void {
+pub fn setgroups(count: usize, groups: []gid_t) !void {
     const exit = linux.setgroups(count, @ptrCast(groups));
     if (exit < 0) {
         return error.SetgroupsFail;
@@ -61,25 +64,16 @@ pub fn atoi(s: []const u8) u32 {
     return std.fmt.parseInt(u32, s, 10) catch 0;
 }
 
-fn parsegroups(alloc: Allocator, s: []const u8) !Group {
+/// parse a group entry line, returns null if USER or GID is not in the entry
+/// doesn't handle multi-line groups
+fn parsegroups(s: []const u8, user: ?[]const u8, gid: gid_t) !?Group {
     var group: Group = undefined;
     var it = mem.splitScalar(u8, s, ':');
     var i: u8 = 0;
 
     while (it.next()) |value| {
         defer i += 1;
-
-        // redundant but whatever
-        if (value.len == 0 or mem.eql(u8, value, "")) {
-            log.debug("{d}: empty entry\n", .{i});
-            // std.debug.print("{d}: empty entry\n", .{i});
-        } else {
-            // std.debug.print("{d}: {s}\n", .{ i, value });
-            log.debug("{d}: {s}\n", .{ i, value });
-        }
-
         const entry_type: group_entry = @enumFromInt(i);
-        // std.debug.print("{d}: {any}\n", .{ i, entry_type });
 
         switch (entry_type) {
             .name => {
@@ -90,81 +84,109 @@ fn parsegroups(alloc: Allocator, s: []const u8) !Group {
             },
             .gid => {
                 group.gid = atoi(value);
+                if (gid == group.gid) {
+                    return group;
+                }
             },
             .users => {
                 if (value.len == 0) {
-                    group.user_list = null;
                     continue;
                 }
 
+                // just going to skip returning the members of a group
+                // for now, I dont think I need it and it makes things
+                // complicated
                 var user_iter = mem.splitScalar(u8, value, ',');
-                var user_names = std.ArrayList([]const u8).init(alloc);
-                // defer user_names.deinit();
 
-                while (user_iter.next()) |user| {
-                    if (user.len == 0) {
+                while (user_iter.next()) |member| {
+                    if (member.len == 0) {
                         continue;
                     }
-                    try user_names.append(user);
+
+                    if (user) |_user| {
+                        if (mem.eql(u8, _user, member) or mem.eql(u8, _user, group.name)) {
+                            return group;
+                        }
+                    }
                 }
-                group.user_list = try user_names.toOwnedSlice();
             },
         }
     }
-    return group;
+    return null;
 }
 
 /// get a group list for the given user
-fn getgrouplist(alloc: Allocator, name: []const u8) !void {
+/// caller must free memory
+pub fn getgrouplist(alloc: Allocator, user: ?[]const u8, gid: gid_t) ![]Group {
     var buf: [1024 * 2]u8 = undefined;
     var it = try fs.readLines(GROUPS, &buf, .{ .open_flags = .{ .mode = .read_only } });
+    var groups = std.ArrayList(Group).init(alloc);
+
     while (try it.next()) |line| {
-        std.log.debug("group ent: {s}\n", .{line});
-
-        const grp = try parsegroups(alloc, line);
-        defer {
-            if (grp.user_list) |list| {
-                alloc.free(list);
-            }
-        }
-
-        if (grp.user_list) |group_list| {
-            // std.debug.print("name {s} - ", .{grp.name});
-            // for (group_list) |uname| {
-            //     std.debug.print("'{s}', ", .{uname});
-            // }
-            // std.debug.print("\n", .{});
-
-            for (group_list) |uname| {
-                if (mem.eql(u8, name, uname)) {
-                    std.debug.print("{s} ", .{grp.name});
-                } else if (mem.eql(u8, name, grp.name)) {
-                    std.debug.print("{s} ", .{grp.name});
-                }
-            }
+        const grp = try parsegroups(line, user, gid);
+        if (grp) |group| {
+            try groups.append(group);
         }
     }
+    return groups.toOwnedSlice();
+}
+
+/// get a grouplist for the given user and set the
+/// supplementary group list to that grouplist
+pub fn initgroups(allocator: Allocator, user: []const u8, gid: gid_t) !void {
+    const groups = try getgrouplist(allocator, user, gid);
+    defer allocator.free(groups);
+
+    const gids: []gid_t = try allocator.alloc(gid_t, groups.len);
+    defer allocator.free(gids);
+
+    for (groups, 0..) |group, i| {
+        gids[i] = group.gid;
+    }
+
+    try setgroups(gids.len, gids);
 }
 
 /// get a name from a GID
 fn getgrnam() !void {}
 
-// fn jk() usize {
-//     return linux.syscall2(.getcwd, @intFromPtr(buf), size);
-// }
-
 test "groups" {
     const alloc = std.testing.allocator;
+
+    try initgroups(alloc, "sweet", 1000);
+
     const groups = try getgroups(alloc);
     defer alloc.free(groups);
 
-    for (groups) |value| {
-        std.debug.print("{d}\n", .{value});
+    for (groups, 1..) |value, i| {
+        std.debug.print("{d}: {d}\n", .{ i, value });
+    }
+
+    const _groups = try getgrouplist(alloc, "sweet", 1000);
+    defer alloc.free(_groups);
+
+    for (_groups) |value| {
+        std.debug.print("{s} {d} {s}\n", .{ value.name, value.gid, value.passwd });
     }
 
     try setgroups(groups.len, groups);
     std.debug.print("\n", .{});
+}
 
-    try getgrouplist(alloc, "sweet");
-    std.debug.print("\n", .{});
+test "fuzz initgroups" {
+    const alloc = std.testing.allocator;
+    const rand_gen = std.Random.DefaultPrng;
+    // var rand = rand_gen.init(0);
+    // var some_random_num = rand.random().int(u32);
+    // std.debug.print("random number is {}", .{some_random_num});
+
+    const global = struct {
+        fn fuzzinitgroups(input: []const u8) anyerror!void {
+            var rand = rand_gen.init(0);
+            const some_random_num = rand.random().int(u32);
+            try initgroups(alloc, input, some_random_num);
+        }
+    };
+    try std.testing.fuzz(global.fuzzinitgroups, .{});
+    try initgroups(alloc, "sweet", 1000);
 }
